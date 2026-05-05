@@ -64,3 +64,11 @@ class TestVectorCache:
         cache.put("doc1", [0.5], metadata={"source": "test.pdf"})
         # metadata 存储不影响向量读取
         assert cache.get("doc1") == [0.5]
+
+    def test_cache_dir(self, tmp_path):
+        cache_dir = str(tmp_path / "my_cache")
+        cache = VectorCache(cache_dir=cache_dir)
+        cache.put("hello", [1.0, 2.0])
+        assert cache.get("hello") == [1.0, 2.0]
+        assert "vector_cache.db" in cache.db_path
+        assert cache_dir in cache.db_path

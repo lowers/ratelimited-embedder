@@ -9,11 +9,10 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from tqdm import tqdm
-from langchain_community.vectorstores import FAISS
 
 from .cache import VectorCache
 from .monitoring import get_hardware_suggestion
-from .types import ProgressCallback
+from .types import EmbeddingsProtocol, ProgressCallback
 
 logger = logging.getLogger(__name__)
 
@@ -32,17 +31,28 @@ class RateControlledEmbedder:
 
     def __init__(
         self,
-        embeddings,
+        embeddings: EmbeddingsProtocol,
         batch_size: int = 16,
         delay: float = 0.5,
         slow_threshold: float = 2.0,
         cache: Optional[VectorCache] = None,
+        cache_path: Optional[str] = None,
+        cache_dir: Optional[str] = None,
     ):
         self.embeddings = embeddings
         self.batch_size = batch_size
         self.delay = delay
         self.slow_threshold = slow_threshold
-        self.cache = cache
+
+        # 优先使用传入的 cache 对象，其次 cache_path，最后 cache_dir
+        if cache:
+            self.cache = cache
+        elif cache_path:
+            self.cache = VectorCache(db_path=cache_path)
+        elif cache_dir:
+            self.cache = VectorCache(cache_dir=cache_dir)
+        else:
+            self.cache = None
 
         self._stats: Dict[str, Any] = {
             "total_chunks": 0,
@@ -104,7 +114,7 @@ class RateControlledEmbedder:
         chunks,
         save_path: str = "faiss_index",
         progress_callback: ProgressCallback = None,
-    ) -> FAISS:
+    ):
         """
         分批构建 FAISS 向量库
 
@@ -116,7 +126,7 @@ class RateControlledEmbedder:
         Returns:
             构建好的 FAISS 向量库
         """
-        from langchain_core.documents import Document
+        from langchain_community.vectorstores import FAISS
 
         texts = [doc.page_content for doc in chunks]
         metadatas = [doc.metadata for doc in chunks]
@@ -177,8 +187,11 @@ class RateControlledEmbedder:
 
         pbar.close()
 
-        # 构建 FAISS
-        vectorstore = FAISS.from_texts(texts, self.embeddings, metadatas=metadatas)
+        # 使用预计算的向量构建 FAISS（不会重复调用 embed_documents）
+        text_embedding_pairs = list(zip(texts, all_vectors))
+        vectorstore = FAISS.from_embeddings(
+            text_embedding_pairs, self.embeddings, metadatas=metadatas,
+        )
         vectorstore.save_local(save_path)
 
         # 更新统计

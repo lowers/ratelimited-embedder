@@ -3,7 +3,9 @@
 import hashlib
 import json
 import logging
+import os
 import sqlite3
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -15,10 +17,18 @@ class VectorCache:
 
     以文本的 MD5 哈希作为 key，存储 embedding 向量和可选元数据。
     避免对相同文本重复调用 embedding API。
+
+    Args:
+        db_path: SQLite 文件完整路径（优先级高于 cache_dir）
+        cache_dir: 缓存目录，文件名自动生成为 vector_cache.db
     """
 
-    def __init__(self, db_path: str = "vector_cache.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = "vector_cache.db", cache_dir: Optional[str] = None):
+        if cache_dir:
+            os.makedirs(cache_dir, exist_ok=True)
+            self.db_path = str(Path(cache_dir) / "vector_cache.db")
+        else:
+            self.db_path = db_path
         self._init_db()
 
     def _init_db(self):
@@ -36,7 +46,7 @@ class VectorCache:
 
     @staticmethod
     def _hash(text: str) -> str:
-        return hashlib.md5(text.encode("utf-8")).hexdigest()
+        return hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
 
     def get(self, text: str) -> Optional[List[float]]:
         """查询缓存，命中返回向量，未命中返回 None"""
@@ -67,11 +77,11 @@ class VectorCache:
 
         Returns:
             (results, miss_indices)
-            results[i] 为向量或 None
+            results[i] 为向量或 None，调用方负责用实际向量填充 None 位置
             miss_indices 为未命中的索引列表
         """
-        results = []
-        miss_indices = []
+        results: List[Optional[List[float]]] = []
+        miss_indices: List[int] = []
         for i, text in enumerate(texts):
             vec = self.get(text)
             results.append(vec)

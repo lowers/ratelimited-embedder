@@ -9,28 +9,36 @@ import logging
 from typing import Any, Dict, List, Optional, Type
 
 from .cache import VectorCache
+from .types import EmbeddingsProtocol
 
 logger = logging.getLogger(__name__)
 
 
 def wrap_embeddings(
-    embeddings,
-    cache_path: str = "vector_cache.db",
-    cache_class: Optional[Type] = None,
-):
+    embeddings: EmbeddingsProtocol,
+    cache_path: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+    cache_class: Optional[Type[VectorCache]] = None,
+) -> "_CachedEmbeddingsProxy":
     """
     包装 LangChain Embeddings 实例，自动启用向量缓存
 
     Args:
         embeddings: 任意 LangChain Embeddings 实例
-        cache_path: SQLite 缓存文件路径
+        cache_path: SQLite 缓存文件完整路径（优先级高于 cache_dir）
+        cache_dir: 缓存目录，文件名自动生成为 vector_cache.db
         cache_class: 自定义缓存类（需实现 get/put/get_batch/put_batch 接口）
 
     Returns:
         包装后的 Embeddings 代理对象，接口与原实例一致
     """
     cache_cls = cache_class or VectorCache
-    cache = cache_cls(db_path=cache_path)
+    if cache_path:
+        cache = cache_cls(db_path=cache_path)
+    elif cache_dir:
+        cache = cache_cls(cache_dir=cache_dir)
+    else:
+        cache = cache_cls()
 
     return _CachedEmbeddingsProxy(embeddings, cache)
 
@@ -38,10 +46,10 @@ def wrap_embeddings(
 class _CachedEmbeddingsProxy:
     """Embeddings 代理，自动查询/写入缓存"""
 
-    def __init__(self, embeddings, cache: VectorCache):
+    def __init__(self, embeddings: EmbeddingsProtocol, cache: VectorCache):
         self._embeddings = embeddings
         self._cache = cache
-        self._cache_stats = {"hits": 0, "misses": 0}
+        self._cache_stats: Dict[str, int] = {"hits": 0, "misses": 0}
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """带缓存的批量 embedding"""
@@ -49,7 +57,7 @@ class _CachedEmbeddingsProxy:
 
         if not miss_indices:
             self._cache_stats["hits"] += len(texts)
-            return results
+            return results  # type: ignore[return-value]
 
         # 只对未命中的文本调用原始 API
         miss_texts = [texts[i] for i in miss_indices]
@@ -66,7 +74,7 @@ class _CachedEmbeddingsProxy:
             len(texts) - len(miss_indices),
             len(miss_indices),
         )
-        return results
+        return results  # type: ignore[return-value]
 
     def embed_query(self, text: str) -> List[float]:
         """带缓存的单条 embedding"""
@@ -80,10 +88,10 @@ class _CachedEmbeddingsProxy:
         self._cache.put(text, vector)
         return vector
 
-    def get_cache_stats(self) -> Dict[str, Any]:
+    def get_cache_stats(self) -> Dict[str, int]:
         """返回缓存命中统计"""
         return dict(self._cache_stats)
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Any:
         """透传未定义的属性到原始 embeddings"""
         return getattr(self._embeddings, name)

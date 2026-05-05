@@ -63,3 +63,13 @@ class TestWrapEmbeddings:
         # 自定义属性透传
         original.custom_attr = "hello"
         assert proxy.custom_attr == "hello"
+
+    def test_cache_dir(self, tmp_path):
+        emb = MockEmbeddings()
+        cache_dir = str(tmp_path / "embed_cache")
+        proxy = wrap_embeddings(emb, cache_dir=cache_dir)
+        result = proxy.embed_query("test")
+        assert len(result) == 3
+        # 第二次应命中缓存
+        result2 = proxy.embed_query("test")
+        assert result2 == result
